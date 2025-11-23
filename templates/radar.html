@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2><i class="bi bi-camera-video"></i> 기상 영상 분석</h2>
+        <p class="text-muted mb-0">위성 및 레이더 영상을 실시간으로 제공합니다.</p>
+    </div>
+    
+    <form action="{{ url_for('radar') }}" method="get" class="d-flex align-items-center bg-white p-2 rounded shadow-sm">
+        <label class="me-2 small fw-bold">내 지역 분석:</label>
+        <select name="district" class="form-select form-select-sm" onchange="this.form.submit()" style="width: auto;">
+            {% for district in districts %}
+            <option value="{{ district }}" {% if district == current_district %}selected{% endif %}>{{ district }}</option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+
+<ul class="nav nav-tabs mb-3 nav-fill" id="weatherTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active fw-bold" id="radar-tab" data-bs-toggle="tab" data-bs-target="#radar" type="button" role="tab">
+            <i class="bi bi-cloud-rain-fill text-primary"></i> 레이더 (강수)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="satellite-tab" data-bs-toggle="tab" data-bs-target="#satellite" type="button" role="tab">
+            <i class="bi bi-globe-asia-australia text-success"></i> 위성 (구름)
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="weatherTabContent">
+    
+    <!-- 1. 레이더 탭 -->
+    <div class="tab-pane fade show active" id="radar" role="tabpanel">
+        <div class="row">
+            <div class="col-lg-8 mb-3">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between">
+                        <span>기상청 레이더 합성 영상 (HSR)</span>
+                        <small>전국 범위</small>
+                    </div>
+                    <div class="card-body p-0 bg-dark text-center">
+                        <img src="{{ radar_url }}" class="img-fluid" alt="레이더 영상" style="max-height: 600px;">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4 mb-3">
+                <div class="card shadow-sm mb-3 border-{{ radar_class }}">
+                    <div class="card-header bg-{{ radar_class }} text-white fw-bold">
+                        <i class="bi bi-geo-alt-fill"></i> {{ current_district }} 실시간 분석
+                    </div>
+                    <div class="card-body text-center">
+                        <h3 class="fw-bold mb-1">{{ radar_val }}</h3>
+                        <p class="mb-0 fw-bold text-{{ radar_class }}">{{ radar_analysis }}</p>
+                        <hr>
+                        <small class="text-muted d-block text-start">
+                            * 기상청 레이더 격자 데이터(CZ)를 기반으로 해당 행정구역의 실시간 반사도를 분석한 결과입니다.
+                        </small>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light fw-bold">
+                        <i class="bi bi-palette-fill"></i> 레이더 범례 (강수 강도)
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-2">
+                            <div style="width: 20px; height: 20px; background: #0000ff; margin-right: 10px;"></div>
+                            <small>약한 비 (0~5 mm/h)</small>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <div style="width: 20px; height: 20px; background: #ffff00; margin-right: 10px;"></div>
+                            <small>보통 비 (5~20 mm/h)</small>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <div style="width: 20px; height: 20px; background: #ff0000; margin-right: 10px;"></div>
+                            <small>강한 비 (20~50 mm/h)</small>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <div style="width: 20px; height: 20px; background: #800080; margin-right: 10px;"></div>
+                            <small>매우 강한 비 (호우경보급)</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 위성 탭 -->
+    <div class="tab-pane fade" id="satellite" role="tabpanel">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                천리안 2A호 적외 영상 (구름 분포)
+            </div>
+            <div class="card-body p-0 bg-dark text-center">
+                <img src="{{ satellite_url }}" class="img-fluid" alt="위성 영상" style="max-height: 700px;">
+            </div>
+            <div class="card-footer text-muted small">
+                * 적외 영상은 구름의 온도를 탐지하여 밤에도 구름의 이동을 확인할 수 있습니다. 흰색일수록 높고 두꺼운 구름입니다.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

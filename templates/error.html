@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mt-5">
+    <div class="col-12 text-center">
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading">데이터 로딩 오류 발생!</h4>
+            <p>{{ message }}</p>
+            <hr>
+            <p class="mb-0">잠시 후 다시 시도해 주십시오. (API 호출 실패 또는 데이터 파싱 오류 가능성)</p>
+        </div>
+        <a href="{{ url_for('index') }}" class="btn btn-primary mt-3">홈으로 돌아가기</a>
+    </div>
+</div>
+{% endblock %}

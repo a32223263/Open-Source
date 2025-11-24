@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, url_for
 from kma_api import (
     get_forecast, get_satellite_image_url, get_hourly_forecast, 
     get_live_weather, get_weather_warning, get_radar_image_url, 
-    get_mid_term_forecast, get_radar_value_for_district,
+    get_mid_term_forecast, get_radar_value_for_district, get_weather_comment,
     SEOUL_DISTRICTS
 )
 
@@ -18,6 +18,17 @@ def get_sky_status(sky_code: str, pty_code: str) -> str:
         sky_map = {'1': '맑음', '3': '구름많음', '4': '흐림'}
         return sky_map.get(sky_code, "알 수 없음")
 
+# [신규] 기온별 옷차림 추천 함수 (데이터 기반 생활 가이드)
+def get_clothing_recommendation(temp):
+    if temp >= 28: return "민소매, 반바지, 원피스 (더위 조심!)"
+    elif temp >= 23: return "반팔, 얇은 셔츠, 반바지, 면바지"
+    elif temp >= 20: return "긴팔티, 가디건, 후드티, 청바지"
+    elif temp >= 17: return "니트, 맨투맨, 가디건, 두꺼운 바지"
+    elif temp >= 12: return "자켓, 야상, 스타킹, 청바지"
+    elif temp >= 9: return "트렌치코트, 점퍼, 니트"
+    elif temp >= 5: return "코트, 가죽자켓, 히트텍"
+    else: return "패딩, 두꺼운 코트, 목도리, 장갑 (한파 대비)"
+
 @app.route('/')
 def index():
     selected_district = request.args.get('district', '종로구')
@@ -28,6 +39,9 @@ def index():
     live_data = get_live_weather(KMA_API_KEY, nx, ny)
     warning_msg = get_weather_warning(KMA_API_KEY)
     satellite_url = get_satellite_image_url(KMA_API_KEY)
+    
+    # [신규] 기상청 전문 해설(통보문) 가져오기
+    expert_comment = get_weather_comment(KMA_API_KEY)
 
     if not forecast_data:
         return render_template('error.html', message="데이터 로딩 실패")
@@ -46,6 +60,9 @@ def index():
         rn1 = live_data.get('RN1', 0)
         if rn1 > 0: precip = rn1
 
+    # [신규] 옷차림 정보 생성
+    clothing_recs = get_clothing_recommendation(temp)
+
     processed_data = {
         "location": f"서울 {selected_district}",
         "date": time.strftime("%Y년 %m월 %d일"),
@@ -57,7 +74,9 @@ def index():
         "SKY": forecast_data.get('sky', '1'),
         "PTY": pty_value,
         "SENSIBLE_TEMP": round(13.12 + 0.6215*temp - 11.37*(wind_speed**0.16) + 0.3965*temp*(wind_speed**0.16), 1),
-        "is_live": True if live_data else False
+        "is_live": True if live_data else False,
+        "clothing": clothing_recs, # 템플릿 전달
+        "comment": expert_comment  # 템플릿 전달
     }
 
     context = {

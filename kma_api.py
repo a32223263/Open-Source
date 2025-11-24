@@ -1,6 +1,7 @@
 import requests
 import email.utils
 from datetime import datetime, timedelta
+import re # 텍스트 정제용 정규표현식 모듈
 
 # 기상청 격자 좌표 + 레이더용 행정구역 코드(법정동코드 10자리)
 SEOUL_DISTRICTS = {
@@ -31,7 +32,7 @@ SEOUL_DISTRICTS = {
     "강동구": {"nx": 62, "ny": 126, "code": "1174000000"}
 }
 
-# [핵심] 네트워크 시간 동기화 (KST 기준)
+# [핵심] 네트워크 시간 동기화 (시스템 시간이 틀려도 정상 작동)
 def get_real_kst_now():
     try:
         res = requests.head("https://www.google.com", timeout=1)
@@ -64,7 +65,7 @@ def get_live_weather(api_key: str, nx: int, ny: int):
         return live_data
     except: return None
 
-# 2. 특보
+# 2. 특보 현황 (상세 정보 포함)
 def get_weather_warning(api_key: str):
     endpoint = "https://apihub.kma.go.kr/api/typ01/url/wrn_now_data.php"
     try:
@@ -80,11 +81,62 @@ def get_weather_warning(api_key: str):
                 elif "S" in line: warning_type = "대설"
                 elif "D" in line: warning_type = "건조"
                 elif "C" in line: warning_type = "한파"
-                seoul_warnings.append(f"{warning_type} 발효중")
-        return ", ".join(list(set(seoul_warnings))) if seoul_warnings else None
+                elif "Y" in line: warning_type = "황사"
+                
+                level = "경보" if "1" in line else "주의보"
+                seoul_warnings.append(f"{warning_type}{level}")
+                
+        if seoul_warnings:
+            return ", ".join(list(set(seoul_warnings))) + " 발효 중"
+        return None
     except: return None
 
-# 3. 단기 예보
+# [신규 추가] 3. 날씨 해설 (기상청 전문 통보문 조회)
+def get_weather_comment(api_key: str):
+    """
+    기상청 예보관이 작성한 '날씨해설(통보문)'을 조회하여 핵심 문장을 추출합니다.
+    사용자에게 "왜 비가 오는지", "언제 그치는지" 등 깊이 있는 정보를 제공합니다.
+    """
+    endpoint = "https://apihub.kma.go.kr/api/typ01/url/wthr_cmt_rpt.php"
+    
+    # 최근 24시간 이내의 해설 검색
+    now = get_real_kst_now()
+    tmfc2 = now.strftime("%Y%m%d%H%M")
+    tmfc1 = (now - timedelta(hours=24)).strftime("%Y%m%d%H%M")
+    
+    # stn=108 (전국/서울 본청 기준)
+    params = {
+        'tmfc1': tmfc1, 'tmfc2': tmfc2, 'stn': '108', 
+        'disp': '0', 'help': '0', 'authKey': api_key
+    }
+    
+    try:
+        res = requests.get(endpoint, params=params, timeout=5)
+        # API 응답이 비정형 텍스트일 수 있으므로 정제 과정 필요
+        lines = res.text.strip().split('\n')
+        comments = []
+        
+        for line in lines:
+            # 유의미한 한글 문장이 포함된 라인만 필터링 (헤더 등 제외)
+            if len(line) > 15 and any(keyword in line for keyword in ["기온", "비", "구름", "안개", "바람", "맑음"]):
+                # 특수문자 일부 제거하여 깔끔하게 만들기
+                clean_line = re.sub(r'[^가-힣a-zA-Z0-9\s\.\,\~\-]', '', line).strip()
+                comments.append(clean_line)
+        
+        # 가장 최근의 유의미한 해설 1~2문장 반환 (너무 길면 잘라서)
+        if comments:
+            full_comment = " ".join(comments[-2:]) # 보통 뒷부분에 요약이 있음
+            if len(full_comment) > 120:
+                return full_comment[:120] + "..."
+            return full_comment
+            
+        return "특이사항이 없는 대체로 평온한 날씨가 예상됩니다."
+        
+    except Exception as e:
+        print(f"날씨 해설 조회 오류: {e}")
+        return None
+
+# 4. 단기 예보
 def get_forecast(api_key: str, nx: int, ny: int):
     endpoint = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
     now = get_real_kst_now()
@@ -118,7 +170,7 @@ def get_forecast(api_key: str, nx: int, ny: int):
         return weather_data
     except: return None
 
-# 4. 위성 영상
+# 5. 위성 영상
 def get_satellite_image_url(api_key: str):
     base_url = "https://apihub.kma.go.kr/api/typ03/cgi/sat/nph-gk2a_img"
     now = get_real_kst_now() - timedelta(minutes=20)
@@ -126,7 +178,7 @@ def get_satellite_image_url(api_key: str):
     tm = now.replace(minute=minute, second=0, microsecond=0).strftime("%Y%m%d%H%M")
     return f"{base_url}?tm={tm}&obs=ir105&map=HR&grid=2&legend=0&size=600&authKey={api_key}"
 
-# 5. 상세 예보 (시간별)
+# 6. 상세 예보 (시간별)
 def get_hourly_forecast(api_key, nx, ny, hours=None):
     endpoint = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
     now = get_real_kst_now()
@@ -155,7 +207,6 @@ def get_hourly_forecast(api_key, nx, ny, hours=None):
         hourly_list = []
         if hours: keys = list(forecast_map.keys())[:hours]
         else: keys = list(forecast_map.keys())
-        
         for k in keys:
             row = forecast_map[k]
             try:
@@ -170,7 +221,7 @@ def get_hourly_forecast(api_key, nx, ny, hours=None):
         return hourly_list
     except: return None
 
-# 6. 중기 예보
+# 7. 중기 예보
 def get_mid_term_forecast(api_key):
     now = get_real_kst_now()
     if now.hour < 6: tmFc = (now - timedelta(days=1)).strftime("%Y%m%d1800")
@@ -189,7 +240,7 @@ def get_mid_term_forecast(api_key):
         return mid_list
     except: return []
 
-# 7. 레이더 영상 URL
+# 8. 레이더 영상 URL
 def get_radar_image_url(api_key: str):
     base_url = "https://apihub.kma.go.kr/api/typ03/cgi/rdr/nph-rdr_cmp1_img"
     now = get_real_kst_now() - timedelta(minutes=20)
@@ -197,7 +248,7 @@ def get_radar_image_url(api_key: str):
     tm = now.replace(minute=minute, second=0, microsecond=0).strftime("%Y%m%d%H%M")
     return f"{base_url}?tm={tm}&cmp=HSR&qcd=HSLP&obs=ECHD&color=C4&map=HR&grid=2&legend=1&size=600&itv=5&authKey={api_key}"
 
-# 8. 레이더 데이터 분석
+# 9. 레이더 데이터 분석
 def get_radar_value_for_district(api_key: str, district_name: str):
     dong_code = SEOUL_DISTRICTS.get(district_name, {}).get("code")
     if not dong_code: return None

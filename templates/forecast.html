@@ -1,133 +1,197 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-calendar-week"></i> 상세 예보</h2>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+    /* 표의 각 행에 그림자와 둥근 모서리 효과를 적용함 */
+    .table-custom tbody tr {
+        background-color: #fff;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        border-radius: 12px;
+    }
     
-    <form action="{{ url_for('forecast') }}" method="get" class="d-flex">
-        <select name="district" class="form-select" onchange="this.form.submit()" style="width: auto; min-width: 150px;">
+    /* 차트 컨테이너의 높이를 300px로 설정하여 가시성을 확보함 */
+    .chart-container {
+        position: relative;
+        height: 300px;
+        width: 100%;
+    }
+</style>
+
+<div class="weather-header d-flex justify-content-between align-items-center">
+    <div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-calendar-week-fill me-2"></i>상세 예보 분석</h2>
+        <p class="mb-0 opacity-75">향후 12시간 및 주간 기상 변화 추이</p>
+    </div>
+    
+    <form action="{{ url_for('forecast') }}" method="get" class="bg-white p-1 rounded-pill shadow-sm">
+        <select name="district" class="form-select border-0 rounded-pill bg-transparent fw-bold text-center" onchange="this.form.submit()" style="width: auto; min-width: 150px; cursor: pointer;">
             {% for district in districts %}
-            <option value="{{ district }}" {% if district == current_district %}selected{% endif %}>{{ district }}</option>
+            <option value="{{ district }}" {% if district == current_district %}selected{% endif %}>서울 {{ district }}</option>
             {% endfor %}
         </select>
     </form>
 </div>
 
-<div class="alert alert-primary mb-4 text-center">
-    <strong>{{ current_district }}</strong>의 예보 정보입니다.
-</div>
-
 {% if short_term_data %}
 
-<h4 class="mb-3"><i class="bi bi-clock"></i> 향후 12시간 예보</h4>
-<div class="card shadow-sm mb-4">
-    <div class="card-body">
-        <canvas id="shortChart" height="80"></canvas>
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-3">
+            <span class="badge bg-primary rounded-pill me-2">Short-term</span>
+            <h5 class="fw-bold m-0 text-dark">향후 12시간 정밀 예보 (기온 & 강수확률)</h5>
+        </div>
+        
+        <div class="dashboard-card p-4 mb-4">
+            <div class="chart-container">
+                <canvas id="shortChart"></canvas>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-custom table-hover text-center align-middle w-100" style="background: transparent;">
+                <thead class="text-secondary small">
+                    <tr>
+                        <th class="fw-light">시간</th>
+                        <th class="fw-light">기온</th>
+                        <th class="fw-light" style="width: 40%;">강수확률</th>
+                        <th class="fw-light">풍속</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in short_term_data %}
+                    <tr>
+                        <td>
+                            <span class="fw-bold">{{ row.hour }}</span><br>
+                            <span class="small text-muted">{{ row.date }}</span>
+                        </td>
+                        <td>
+                            <span class="fs-5 fw-bold text-dark">{{ row.temp }}°</span>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <span class="small me-2 text-muted" style="width: 35px;">{{ row.rain_prob }}%</span>
+                                <div class="progress flex-grow-1" style="height: 8px; border-radius: 4px; background-color: #f1f3f5;">
+                                    <div class="progress-bar bg-info" role="progressbar" style="width: {{ row.rain_prob }}%"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-muted">
+                            <i class="bi bi-wind"></i> {{ row.wind_spd }} m/s
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<div class="table-responsive mb-5">
-    <table class="table table-hover text-center align-middle">
-        <thead class="table-light">
-            <tr>
-                <th>날짜/시간</th>
-                <th>기온</th>
-                <th>강수확률</th>
-                <th>풍속</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in short_term_data %}
-            <tr>
-                <td>{{ row.date }} {{ row.hour }}</td>
-                <td class="fw-bold text-primary">{{ row.temp }}°C</td>
-                <td>
-                    <div class="progress" style="height: 20px;">
-                        <div class="progress-bar bg-info" role="progressbar" style="width: {{ row.rain_prob }}%">{{ row.rain_prob }}%</div>
-                    </div>
-                </td>
-                <td>{{ row.wind_spd }} m/s</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center mb-3 mt-4">
+            <span class="badge bg-success rounded-pill me-2">Weekly</span>
+            <h5 class="fw-bold m-0 text-dark">주간 경향 (기온 & 강수확률)</h5>
+        </div>
+        
+        <div class="dashboard-card p-4 mb-4">
+            <div class="chart-container">
+                <canvas id="weeklyChart"></canvas>
+            </div>
+        </div>
 
-<hr class="my-5 border-3">
-
-<h4 class="mb-3"><i class="bi bi-calendar3"></i> 주간 예보 (약 7일)</h4>
-<div class="alert alert-info py-2 small">
-    <i class="bi bi-info-circle-fill"></i> 3일 후부터의 데이터는 기상청 중기예보 API를 사용하며, <strong>풍속 데이터는 제공되지 않습니다.</strong> (오전/오후 기준)
-</div>
-
-<div class="card shadow-sm mb-4">
-    <div class="card-body">
-        <canvas id="weeklyChart" height="100"></canvas>
-    </div>
-</div>
-
-<div class="table-responsive">
-    <table class="table table-bordered table-striped text-center align-middle" style="font-size: 0.95rem;">
-        <thead class="table-dark">
-            <tr>
-                <th>시간</th>
-                <th>기온 (°C)</th>
-                <th>강수확률 (%)</th>
-                <th>풍속 (m/s)</th>
-            </tr>
-        </thead>
-        <tbody>
+        <div class="row g-3">
             {% for row in weekly_data %}
-            <tr>
-                <td>
-                    <strong>{{ row.date }}</strong><br>
-                    <span class="text-muted small">{{ row.hour }}</span>
-                </td>
-                <td class="fw-bold" style="color: {% if row.temp >= 30 %}red{% elif row.temp <= 0 %}blue{% else %}black{% endif %};">
-                    {{ row.temp }}
-                </td>
-                <td>
-                    {% if row.rain_prob > 0 %}
-                    <span class="text-info fw-bold">{{ row.rain_prob }}%</span>
+            <div class="col-6 col-md-4 col-lg-2">
+                <div class="dashboard-card p-3 text-center h-100 d-flex flex-column justify-content-center">
+                    <div class="small text-muted mb-1">{{ row.date }}</div>
+                    <div class="fw-bold mb-2">{{ row.hour }}</div>
+                    <h4 class="fw-bold mb-2" style="color: {% if row.temp >= 30 %}#ff6b6b{% elif row.temp <= 0 %}#4c6ef5{% else %}#343a40{% endif %};">
+                        {{ row.temp }}°
+                    </h4>
+                    
+                    {% if row.rain_prob > 30 %}
+                    <span class="badge bg-info text-white rounded-pill px-2">
+                        <i class="bi bi-umbrella-fill"></i> {{ row.rain_prob }}%
+                    </span>
                     {% else %}
-                    -
+                    <span class="badge bg-light text-secondary rounded-pill px-2">
+                        <i class="bi bi-sun-fill text-warning"></i> {{ row.rain_prob }}%
+                    </span>
                     {% endif %}
-                </td>
-                <td>
-                    {% if row.wind_spd != '-' %}
-                        {{ row.wind_spd }}
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-            </tr>
+                </div>
+            </div>
             {% endfor %}
-        </tbody>
-    </table>
+        </div>
+    </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    // 차트 공통 옵션: 이중 축(Y축 2개)을 사용하여 기온과 강수확률을 함께 표시함
     const commonOptions = {
         responsive: true,
+        maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8 } },
+            tooltip: { 
+                backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                titleColor: '#000', 
+                bodyColor: '#666', 
+                borderColor: 'rgba(0,0,0,0.1)', 
+                borderWidth: 1,
+                padding: 10,
+                cornerRadius: 8,
+                callbacks: {
+                    // 툴팁 레이블에 단위(°C, %)를 추가하여 표시함
+                    label: function(context) {
+                        let label = context.dataset.label || '';
+                        if (label) {
+                            label += ': ';
+                        }
+                        if (context.parsed.y !== null) {
+                            label += context.parsed.y;
+                            if (context.dataset.type === 'bar') label += '%';
+                            else label += '°C';
+                        }
+                        return label;
+                    }
+                }
+            }
+        },
         scales: {
             y: {
-                type: 'linear', display: true, position: 'left',
-                min: {{ graph_min }}, max: {{ graph_max }},
-                title: { display: true, text: '기온 (°C)' }
+                type: 'linear',
+                display: false, // 왼쪽 Y축(기온)의 눈금을 숨김
+                position: 'left',
+                min: {{ graph_min }} - 5, 
+                max: {{ graph_max }} + 5
             },
             y1: {
-                type: 'linear', display: true, position: 'right',
-                min: 0, max: 100,
-                grid: { drawOnChartArea: false },
-                title: { display: true, text: '강수확률 (%)' }
+                type: 'linear',
+                display: false, // 오른쪽 Y축(강수확률)의 눈금을 숨김
+                position: 'right',
+                min: 0,
+                max: 100,
+                grid: {
+                    drawOnChartArea: false // 오른쪽 축의 그리드 라인을 제거함
+                }
+            },
+            x: {
+                grid: { display: false } // X축 그리드 라인을 제거함
             }
         }
     };
 
-    // 1. 단기 그래프 (12시간)
+    // 단기 예보 차트 생성: 기온은 선 그래프, 강수확률은 막대 그래프로 표현함
     const ctxShort = document.getElementById('shortChart').getContext('2d');
+    
+    // 기온 그래프 하단에 그라데이션 채우기 효과를 적용함
+    let gradientTemp = ctxShort.createLinearGradient(0, 0, 0, 300);
+    gradientTemp.addColorStop(0, 'rgba(255, 99, 132, 0.4)');
+    gradientTemp.addColorStop(1, 'rgba(255, 99, 132, 0.0)');
+
     new Chart(ctxShort, {
         type: 'line',
         data: {
@@ -135,27 +199,34 @@
             datasets: [
                 {
                     label: '기온',
+                    type: 'line',
                     data: [{% for row in short_term_data %}{{ row.temp }},{% endfor %}],
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderColor: '#ff6384',
+                    backgroundColor: gradientTemp,
+                    borderWidth: 3,
+                    tension: 0.4, // 선을 부드럽게 곡선 처리함
+                    fill: true,
                     yAxisID: 'y',
-                    tension: 0.3,
-                    fill: true
+                    order: 1 // 선 그래프가 막대 그래프 위에 오도록 순서를 지정함
                 },
                 {
                     label: '강수확률',
-                    data: [{% for row in short_term_data %}{{ row.rain_prob }},{% endfor %}],
-                    borderColor: 'rgb(54, 162, 235)',
-                    backgroundColor: 'rgba(54, 162, 235, 0.3)',
-                    yAxisID: 'y1',
                     type: 'bar',
+                    data: [{% for row in short_term_data %}{{ row.rain_prob }},{% endfor %}],
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    borderColor: 'rgba(54, 162, 235, 0.8)',
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    barThickness: 15,
+                    yAxisID: 'y1',
+                    order: 2 
                 }
             ]
         },
         options: commonOptions
     });
 
-    // 2. 주간 그래프 (전체)
+    // 주간 예보 차트 생성: 단기 예보 차트와 동일한 스타일을 적용함
     const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
     new Chart(ctxWeekly, {
         type: 'line',
@@ -164,20 +235,27 @@
             datasets: [
                 {
                     label: '기온',
+                    type: 'line',
                     data: [{% for row in weekly_data %}{{ row.temp }},{% endfor %}],
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderColor: '#4bc0c0',
+                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                    borderWidth: 3,
+                    tension: 0.3,
+                    fill: true,
                     yAxisID: 'y',
-                    tension: 0.2,
-                    pointRadius: 2
+                    order: 1
                 },
                 {
                     label: '강수확률',
-                    data: [{% for row in weekly_data %}{{ row.rain_prob }},{% endfor %}],
-                    borderColor: 'rgb(153, 102, 255)',
-                    backgroundColor: 'rgba(153, 102, 255, 0.3)',
-                    yAxisID: 'y1',
                     type: 'bar',
+                    data: [{% for row in weekly_data %}{{ row.rain_prob }},{% endfor %}],
+                    backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                    borderColor: 'rgba(153, 102, 255, 0.8)',
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    barThickness: 12,
+                    yAxisID: 'y1',
+                    order: 2
                 }
             ]
         },
@@ -186,8 +264,8 @@
 </script>
 
 {% else %}
-<div class="alert alert-warning text-center" role="alert">
-    현재 예보 데이터를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.
+<div class="alert alert-warning text-center rounded-pill py-3 shadow-sm" role="alert">
+    <i class="bi bi-exclamation-circle-fill me-2"></i> 현재 예보 데이터를 불러올 수 없습니다. API 상태를 확인해주세요.
 </div>
 {% endif %}
 

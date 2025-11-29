@@ -1,9 +1,9 @@
 import requests
 import email.utils
 from datetime import datetime, timedelta
-import re # 텍스트 정제용 정규표현식 모듈
+import re
 
-# 기상청 격자 좌표 + 레이더용 행정구역 코드(법정동코드 10자리)
+# 서울 각 자치구의 기상청 격자 좌표(NX, NY)와 행정구역 코드를 매핑함
 SEOUL_DISTRICTS = {
     "종로구": {"nx": 60, "ny": 127, "code": "1111000000"},
     "중구": {"nx": 60, "ny": 127, "code": "1114000000"},
@@ -32,7 +32,7 @@ SEOUL_DISTRICTS = {
     "강동구": {"nx": 62, "ny": 126, "code": "1174000000"}
 }
 
-# [핵심] 네트워크 시간 동기화 (시스템 시간이 틀려도 정상 작동)
+# 구글 서버 헤더를 이용해 정확한 한국 표준시(KST)를 가져옴 (시스템 시간 오차 방지)
 def get_real_kst_now():
     try:
         res = requests.head("https://www.google.com", timeout=1)
@@ -42,6 +42,7 @@ def get_real_kst_now():
     except:
         return datetime.utcnow() + timedelta(hours=9)
 
+# 초단기실황 API 호출을 위한 기준 시간(Base Time)을 계산함 (매시 40분 기준 갱신)
 def get_base_time_for_ultrasrt_ncst():
     now = get_real_kst_now()
     if now.minute < 40:
@@ -50,7 +51,7 @@ def get_base_time_for_ultrasrt_ncst():
         target = now
     return target.strftime('%Y%m%d'), target.strftime('%H00')
 
-# 1. 현재 날씨 (초단기실황)
+# 기상청 초단기실황 API를 호출하여 현재 날씨 데이터를 가져옴
 def get_live_weather(api_key: str, nx: int, ny: int):
     endpoint = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getUltraSrtNcst"
     base_date, base_time = get_base_time_for_ultrasrt_ncst()
@@ -61,11 +62,12 @@ def get_live_weather(api_key: str, nx: int, ny: int):
         items = res.json().get('response', {}).get('body', {}).get('items', {}).get('item')
         if not items: return None
         live_data = {}
-        for item in items: live_data[item['category']] = float(item['obsrValue'])
+        for item in items: 
+            live_data[item['category']] = float(item['obsrValue'])
         return live_data
     except: return None
 
-# 2. 특보 현황 (상세 정보 포함)
+# 현재 발효 중인 기상 특보를 조회하고 서울 지역 해당 사항을 필터링함
 def get_weather_warning(api_key: str):
     endpoint = "https://apihub.kma.go.kr/api/typ01/url/wrn_now_data.php"
     try:
@@ -75,6 +77,7 @@ def get_weather_warning(api_key: str):
         for line in lines:
             if "서울" in line:
                 warning_type = "기상특보"
+                # 특보 코드를 한글 명칭으로 변환함
                 if "W" in line: warning_type = "강풍"
                 elif "R" in line: warning_type = "호우"
                 elif "H" in line: warning_type = "폭염"
@@ -91,11 +94,10 @@ def get_weather_warning(api_key: str):
         return None
     except: return None
 
-# [신규 추가] 3. 날씨 해설 (기상청 전문 통보문 조회)
+# 기상청 예보관이 작성한 날씨 해설(통보문)을 조회하여 핵심 문장을 추출함
 def get_weather_comment(api_key: str):
     """
-    기상청 예보관이 작성한 '날씨해설(통보문)'을 조회하여 핵심 문장을 추출합니다.
-    사용자에게 "왜 비가 오는지", "언제 그치는지" 등 깊이 있는 정보를 제공합니다.
+    사용자에게 "왜 비가 오는지", "언제 그치는지" 등 깊이 있는 정보를 제공
     """
     endpoint = "https://apihub.kma.go.kr/api/typ01/url/wthr_cmt_rpt.php"
     
@@ -112,12 +114,11 @@ def get_weather_comment(api_key: str):
     
     try:
         res = requests.get(endpoint, params=params, timeout=5)
-        # API 응답이 비정형 텍스트일 수 있으므로 정제 과정 필요
         lines = res.text.strip().split('\n')
         comments = []
         
         for line in lines:
-            # 유의미한 한글 문장이 포함된 라인만 필터링 (헤더 등 제외)
+            # 유의미한 키워드가 포함된 문장만 필터링하고 특수문자를 제거함
             if len(line) > 15 and any(keyword in line for keyword in ["기온", "비", "구름", "안개", "바람", "맑음"]):
                 # 특수문자 일부 제거하여 깔끔하게 만들기
                 clean_line = re.sub(r'[^가-힣a-zA-Z0-9\s\.\,\~\-]', '', line).strip()
@@ -125,7 +126,7 @@ def get_weather_comment(api_key: str):
         
         # 가장 최근의 유의미한 해설 1~2문장 반환 (너무 길면 잘라서)
         if comments:
-            full_comment = " ".join(comments[-2:]) # 보통 뒷부분에 요약이 있음
+            full_comment = " ".join(comments[-2:])
             if len(full_comment) > 120:
                 return full_comment[:120] + "..."
             return full_comment
@@ -136,14 +137,17 @@ def get_weather_comment(api_key: str):
         print(f"날씨 해설 조회 오류: {e}")
         return None
 
-# 4. 단기 예보
+# 기상청 단기예보 API를 호출하여 미래 날씨 데이터를 가져옴
 def get_forecast(api_key: str, nx: int, ny: int):
     endpoint = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
+    
+    # 안정적인 데이터 확보를 위해 3시간 전 데이터를 기준으로 요청함
     now = get_real_kst_now()
     target_time = now - timedelta(hours=3)
     base_date = target_time.strftime('%Y%m%d')
     hour = target_time.hour
     
+    # 기상청 예보 발표 시각(Base Time)에 맞춰 시간을 조정함
     time_mapping = {2:'0200', 5:'0500', 8:'0800', 11:'1100', 14:'1400', 17:'1700', 20:'2000', 23:'2300'}
     base_time = '2300'
     for h in sorted(time_mapping.keys()):
@@ -151,26 +155,76 @@ def get_forecast(api_key: str, nx: int, ny: int):
         base_time = time_mapping[h]
     if hour < 2: base_date = (target_time - timedelta(days=1)).strftime('%Y%m%d')
 
-    params = {'pageNo': '1', 'numOfRows': '1000', 'dataType': 'JSON', 'base_date': base_date, 'base_time': base_time, 'nx': str(nx), 'ny': str(ny), 'authKey': api_key}
+    params = {
+        'pageNo': '1', 
+        'numOfRows': '1000', 
+        'dataType': 'JSON', 
+        'base_date': base_date, 
+        'base_time': base_time, 
+        'nx': str(nx), 
+        'ny': str(ny), 
+        'authKey': api_key
+    }
+    
     try:
-        res = requests.get(endpoint, params=params, timeout=5)
-        items = res.json().get('response', {}).get('body', {}).get('items', {}).get('item')
-        if not items: return None
+        # SSL 인증서 검증을 무시하고 요청을 보냄 (verify=False)
+        res = requests.get(endpoint, params=params, timeout=10, verify=False)
+        
+        # [디버깅] API 응답 코드가 200이 아니면 오류 정보를 출력하고 None을 반환함
+        if res.status_code != 200:
+            print(f"============== [API 오류] ==============")
+            print(f"상태 코드: {res.status_code}")
+            print(f"응답 본문: {res.text[:200]}")
+            print(f"요청 URL: {res.url}")
+            print("========================================")
+            return None
+
+        # [디버깅] JSON 파싱 시도
+        try:
+            json_data = res.json()
+        except ValueError:
+            print(f"============== [JSON 파싱 오류] ==============")
+            print(f"API가 JSON이 아닌 텍스트를 반환했습니다.")
+            print(f"응답 내용: {res.text[:200]}")
+            print("============================================")
+            return None
+
+        items = json_data.get('response', {}).get('body', {}).get('items', {}).get('item')
+        if not items:
+            print(f"============== [데이터 없음] ==============")
+            print(f"응답은 성공했으나 items 데이터가 비어있습니다.")
+            print(f"헤더 메시지: {json_data.get('response', {}).get('header', {})}")
+            print("=========================================")
+            return None
+            
         weather_data = {}
+        
+        # 필요한 카테고리(기온, 강수, 하늘상태 등) 데이터를 추출하여 저장
+        needed_cats = ['TMP', 'PCP', 'SKY', 'PTY', 'WSD', 'REH', 'VEC'] 
+        
         for item in items:
             cat = item.get('category')
             val = item.get('fcstValue')
+            
             if cat == 'TMP' and 'temp' not in weather_data: weather_data['temp'] = val
             elif cat == 'PCP' and 'precip' not in weather_data: weather_data['precip'] = val
             elif cat == 'SKY' and 'sky' not in weather_data: weather_data['sky'] = val
             elif cat == 'PTY' and 'pty' not in weather_data: weather_data['pty'] = val
             elif cat == 'WSD' and 'wind_speed' not in weather_data: weather_data['wind_speed'] = val
             elif cat == 'REH' and 'humidity' not in weather_data: weather_data['humidity'] = val
-            if len(weather_data) >= 6: break
+            elif cat == 'VEC' and 'wind_dir' not in weather_data: weather_data['wind_dir'] = val
+            
+            if len(weather_data) >= 7: break
+            
         return weather_data
-    except: return None
 
-# 5. 위성 영상
+    except Exception as e:
+        print(f"============== [시스템 예외 발생] ==============")
+        print(f"에러 메시지: {e}")
+        print("==============================================")
+        return None
+
+# 천리안 위성 영상 URL을 생성함 (최근 20분 전 영상 기준)
 def get_satellite_image_url(api_key: str):
     base_url = "https://apihub.kma.go.kr/api/typ03/cgi/sat/nph-gk2a_img"
     now = get_real_kst_now() - timedelta(minutes=20)
@@ -178,7 +232,7 @@ def get_satellite_image_url(api_key: str):
     tm = now.replace(minute=minute, second=0, microsecond=0).strftime("%Y%m%d%H%M")
     return f"{base_url}?tm={tm}&obs=ir105&map=HR&grid=2&legend=0&size=600&authKey={api_key}"
 
-# 6. 상세 예보 (시간별)
+# 시간대별 상세 예보 데이터를 리스트 형태로 반환함
 def get_hourly_forecast(api_key, nx, ny, hours=None):
     endpoint = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
     now = get_real_kst_now()
@@ -199,6 +253,8 @@ def get_hourly_forecast(api_key, nx, ny, hours=None):
         items = res.json().get('response', {}).get('body', {}).get('items', {}).get('item')
         if not items: return None
         items.sort(key=lambda x: x['fcstDate'] + x['fcstTime'])
+
+        # 시간대별로 데이터를 그룹화함
         forecast_map = {}
         for item in items:
             key = item['fcstDate'] + item['fcstTime']
@@ -209,6 +265,7 @@ def get_hourly_forecast(api_key, nx, ny, hours=None):
         else: keys = list(forecast_map.keys())
         for k in keys:
             row = forecast_map[k]
+            # 필요한 데이터만 추출하여 리스트에 추가함
             try:
                 hourly_list.append({
                     "date": f"{k[4:6]}/{k[6:8]}",
@@ -221,7 +278,7 @@ def get_hourly_forecast(api_key, nx, ny, hours=None):
         return hourly_list
     except: return None
 
-# 7. 중기 예보
+# 중기 예보(3일~10일 후) 데이터를 가져옴
 def get_mid_term_forecast(api_key):
     now = get_real_kst_now()
     if now.hour < 6: tmFc = (now - timedelta(days=1)).strftime("%Y%m%d1800")
@@ -240,7 +297,7 @@ def get_mid_term_forecast(api_key):
         return mid_list
     except: return []
 
-# 8. 레이더 영상 URL
+# 레이더 영상 URL을 생성함
 def get_radar_image_url(api_key: str):
     base_url = "https://apihub.kma.go.kr/api/typ03/cgi/rdr/nph-rdr_cmp1_img"
     now = get_real_kst_now() - timedelta(minutes=20)
@@ -248,7 +305,7 @@ def get_radar_image_url(api_key: str):
     tm = now.replace(minute=minute, second=0, microsecond=0).strftime("%Y%m%d%H%M")
     return f"{base_url}?tm={tm}&cmp=HSR&qcd=HSLP&obs=ECHD&color=C4&map=HR&grid=2&legend=1&size=600&itv=5&authKey={api_key}"
 
-# 9. 레이더 데이터 분석
+# 특정 행정구역의 레이더 반사도(dBZ) 수치를 가져옴
 def get_radar_value_for_district(api_key: str, district_name: str):
     dong_code = SEOUL_DISTRICTS.get(district_name, {}).get("code")
     if not dong_code: return None
@@ -264,3 +321,56 @@ def get_radar_value_for_district(api_key: str, district_name: str):
         val = float(items[0].get('value', -999))
         return 0.0 if val < -100 else val
     except: return None
+
+# 24시간 전 서울의 과거 기온 데이터를 텍스트 파싱하여 가져옴
+def get_yesterday_seoul_temp(api_key: str):
+    # 어제 시간 구하기 (현재 시간 - 24시간)
+    now = get_real_kst_now()
+    yesterday = now - timedelta(hours=24)
+    tm = yesterday.strftime("%Y%m%d%H00") # 예: 202511281400
+    
+    # 기상청 지상 관측(과거 자료) API 호출
+    # stn=108은 서울 종로구 송월동(기상청 본청) 기준 관측소
+    endpoint = "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm2.php"
+    params = {
+        'tm': tm, 
+        'stn': '108', # 서울 대표 관측소
+        'help': '0',  # 도움말 끄기
+        'authKey': api_key
+    }
+    
+    try:
+        res = requests.get(endpoint, params=params, timeout=5)
+        
+        # 텍스트 데이터 파싱
+        lines = res.text.strip().split('\n')
+        
+        # 데이터가 너무 짧으면 실패 처리
+        if len(lines) < 2: return None
+        
+        # 헤더 라인 찾기 (TM, STN, ... TA ... 등)
+        headers = []
+        data_values = []
+        
+        # #으로 시작하는 주석 라인 제거하고 실제 데이터 찾기
+        valid_lines = [line for line in lines if not line.startswith('#')]
+        
+        if len(valid_lines) < 2: return None
+        
+        # 첫 번째 줄은 헤더, 두 번째 줄은 데이터
+        # 공백 기준으로 분리 (split()은 다중 공백도 처리함)
+        headers = valid_lines[0].split()
+        data_values = valid_lines[1].split()
+        
+        # 'TA' (Temperature Air, 기온) 컬럼의 인덱스 찾기
+        if 'TA' in headers:
+            idx = headers.index('TA')
+            if idx < len(data_values):
+                temp_str = data_values[idx]
+                return float(temp_str)
+                
+        return None
+        
+    except Exception as e:
+        print(f"어제 날씨 조회 실패: {e}")
+        return None
